@@ -1,0 +1,19 @@
+# MATLAB
+*.asv
+*.m~*
+*.mex*
+*.mdl.r20*
+*.slxc
+*.slprj/
+*.autosave
+*.mlpkginstall
+*.dylib
+*.log
+
+# macOS cruft
+.DS_Store
+
+# Build outputs
+/build/output/
+/*.zip
+
