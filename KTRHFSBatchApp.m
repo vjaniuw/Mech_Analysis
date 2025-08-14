@@ -1,5 +1,5 @@
 classdef KTRHFSBatchApp < matlab.apps.AppBase
-    %% ---------- UI HANDLES ----------
+    %% ================== UI HANDLES ==================
     properties (Access = private)
         UIFigure             matlab.ui.Figure
         Grid                 matlab.ui.container.GridLayout
@@ -7,15 +7,26 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
         % top row
         SelectParentButton   matlab.ui.control.Button
         ParentPathLabel      matlab.ui.control.Label
-        StartBatchButton     matlab.ui.control.Button
+        StartButton          matlab.ui.control.Button
         ModeLabel            matlab.ui.control.Label
         ModeDropDown         matlab.ui.control.DropDown
         FolderStatusLabel    matlab.ui.control.Label
 
-        % tabs + axes
+        % record row
+        RecordIdxLabel       matlab.ui.control.Label
+        T1Label              matlab.ui.control.Label
+        T1Field              matlab.ui.control.NumericEditField
+        T2Label              matlab.ui.control.Label
+        T2Field              matlab.ui.control.NumericEditField
+        T3Label              matlab.ui.control.Label
+        T3Field              matlab.ui.control.NumericEditField
+
+        % tabs
         TabGroup             matlab.ui.container.TabGroup
         TabKTR               matlab.ui.container.Tab
         TabHFS               matlab.ui.container.Tab
+
+        % axes
         Ax                   matlab.ui.control.UIAxes
         AxFFT                matlab.ui.control.UIAxes
 
@@ -41,36 +52,30 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
         HFSParamLabel        matlab.ui.control.Label
         HFSParamValLabel     matlab.ui.control.Label
 
-        % record row (numeric fields)
-        RecordIdxLabel       matlab.ui.control.Label
-        T1Label              matlab.ui.control.Label
-        T1Field              matlab.ui.control.NumericEditField
-        T2Label              matlab.ui.control.Label
-        T2Field              matlab.ui.control.NumericEditField
-        T3Label              matlab.ui.control.Label
-        T3Field              matlab.ui.control.NumericEditField
-
-        % bottom readout
+        % bottom readouts
         F0Label              matlab.ui.control.Label
         F0ValLabel           matlab.ui.control.Label
+
+        % status log
+        StatusArea           matlab.ui.control.TextArea
     end
 
-    %% ---------- APP STATE ----------
+    %% ================== APP STATE ==================
     properties (Access = private)
         % batch
         parentDir   char
-        subDirs     string
+        subDirs     string          % recursive data folders
         iFolder     double = 0
         folderName  char
 
-        % per folder
-        dats_ktr    cell
-        dats_hfs    cell
+        % per folder data
+        dats_ktr    cell            % {.1 files}
+        dats_hfs    cell            % {.2 files}
 
-        % KTR state (interactive)
+        % KTR state
         j           double = 1
-        cache       cell
-        tmarks      double
+        cache       cell            % per KTR: struct('t',t,'f',f)
+        tmarks      double          % [N x 3]
         ktr_all     double
         force_all   double
         f0_all      double
@@ -89,10 +94,10 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
         guessT      double = [0.5073, 0.5149, 0.5295]
     end
 
-    %% ---------- CONSTRUCTOR ----------
+    %% ================== CONSTRUCTOR ==================
     methods (Access = public)
         function app = KTRHFSBatchApp
-            % Modal splash that persists until Continue
+            % Persistent splash until Continue
             splashPath = app.resourcePath('assets','Cardiac Tissue Mechanics Analyzer.png');
             W = 680; H = 440;
             if isfile(splashPath)
@@ -121,7 +126,7 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
         end
     end
 
-    %% ---------- PATH HELPER ----------
+    %% ================== PATH HELPER ==================
     methods (Access = private)
         function p = resourcePath(~, varargin)
             if isdeployed
@@ -134,15 +139,15 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
         end
     end
 
-    %% ---------- UI SETUP ----------
+    %% ================== UI SETUP ==================
     methods (Access = private)
         function createComponents(app)
-            app.UIFigure = uifigure('Name','KTR/HFS Batch Reviewer','Position',[80 80 1220 740]);
+            app.UIFigure = uifigure('Name','KTR/HFS Batch Reviewer','Position',[80 80 1240 780]);
             ico = app.resourcePath('assets','Cardiac Tissue Mechanics Analyzer.png');
             if isfile(ico), app.UIFigure.Icon = ico; end
 
-            app.Grid = uigridlayout(app.UIFigure,[7,8]);
-            app.Grid.RowHeight   = {30,30,30,'1x',40,30,30};
+            app.Grid = uigridlayout(app.UIFigure,[8,8]);
+            app.Grid.RowHeight   = {30,30,30,'1x',40,24,120,30};
             app.Grid.ColumnWidth = {130,130,110,140,'1x',110,110,130};
 
             % Row 1
@@ -153,9 +158,8 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
             app.ParentPathLabel.Layout.Row=1; app.ParentPathLabel.Layout.Column=[2 8];
 
             % Row 2
-            app.StartBatchButton = uibutton(app.Grid,'Text','Start', ...
-                'ButtonPushedFcn',@app.onStart);
-            app.StartBatchButton.Layout.Row=2; app.StartBatchButton.Layout.Column=1;
+            app.StartButton = uibutton(app.Grid,'Text','Start','ButtonPushedFcn',@app.onStart);
+            app.StartButton.Layout.Row=2; app.StartButton.Layout.Column=1;
 
             app.ModeLabel = uilabel(app.Grid,'Text','Mode:','HorizontalAlignment','right');
             app.ModeLabel.Layout.Row=2; app.ModeLabel.Layout.Column=2;
@@ -165,7 +169,7 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
             app.FolderStatusLabel = uilabel(app.Grid,'Text','Folder: 0 / 0');
             app.FolderStatusLabel.Layout.Row=2; app.FolderStatusLabel.Layout.Column=[4 8];
 
-            % Row 3: record + numeric fields
+            % Row 3
             app.RecordIdxLabel = uilabel(app.Grid,'Text','Record: — / —');
             app.RecordIdxLabel.Layout.Row=3; app.RecordIdxLabel.Layout.Column=1;
 
@@ -187,7 +191,7 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
             app.T1Field.Limits = [-Inf Inf]; app.T2Field.Limits = [-Inf Inf]; app.T3Field.Limits = [-Inf Inf];
             app.T1Field.Enable='off'; app.T2Field.Enable='off'; app.T3Field.Enable='off';
 
-            % Row 4: tabs, axes fill
+            % Row 4: tabs
             app.TabGroup = uitabgroup(app.Grid,'SelectionChangedFcn',@app.onTabChanged);
             app.TabGroup.Layout.Row=4; app.TabGroup.Layout.Column=[1 8];
 
@@ -228,16 +232,21 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
             app.HFSParamLabel   = uilabel(app.HCtrlGrid,'Text','HFFTS:','HorizontalAlignment','right');                 app.HFSParamLabel.Layout.Column=6;
             app.HFSParamValLabel= uilabel(app.HCtrlGrid,'Text','—');                                                    app.HFSParamValLabel.Layout.Column=6;
 
-            % Row 6: f0 readout
-            app.F0Label    = uilabel(app.Grid,'Text','f0 baseline:','HorizontalAlignment','right'); app.F0Label.Layout.Row=6; app.F0Label.Layout.Column=5;
-            app.F0ValLabel = uilabel(app.Grid,'Text','—');                                          app.F0ValLabel.Layout.Row=6; app.F0ValLabel.Layout.Column=6;
+            % Row 6: f0 baseline
+            app.F0Label    = uilabel(app.Grid,'Text','f0 baseline:','HorizontalAlignment','right');
+            app.F0Label.Layout.Row=6; app.F0Label.Layout.Column=5;
+            app.F0ValLabel = uilabel(app.Grid,'Text','—'); app.F0ValLabel.Layout.Row=6; app.F0ValLabel.Layout.Column=6;
 
-            % keyboard nudges
+            % Row 7: Status log
+            app.StatusArea = uitextarea(app.Grid,'Editable','off','Value',{'Ready.'});
+            app.StatusArea.Layout.Row=7; app.StatusArea.Layout.Column=[1 8];
+
+            % Row 8: key handler
             app.UIFigure.WindowKeyPressFcn = @(~,evt) app.onKeyNudge(evt);
         end
     end
 
-    %% ---------- EVENT HANDLERS ----------
+    %% ================== EVENT HANDLERS ==================
     methods (Access = private)
         function onSelectParent(app,~,~)
             d = uigetdir();
@@ -245,27 +254,30 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
             app.parentDir = d;
             app.ParentPathLabel.Text = d;
 
-            app.subDirs = app.enumerateDataFolders(d);  % recursive leaves with data
+            app.subDirs = app.enumerateDataFolders(d);  % recursive leaves
             app.iFolder = 0;
             app.FolderStatusLabel.Text = sprintf('Folder: 0 / %d', numel(app.subDirs));
             app.clearFigure();
             app.TabGroup.SelectedTab = app.TabKTR;
+            app.log(sprintf('Selected parent: %s (%d data folders)', d, numel(app.subDirs)));
         end
 
         function onStart(app,~,~)
             if isempty(app.subDirs)
-                uialert(app.UIFigure,'Pick a parent folder with subfolders that contain data.','Info'); return;
+                uialert(app.UIFigure,'Pick a parent folder that contains data folders.','Info'); 
+                app.log('Start blocked: no data folders detected.');
+                return;
             end
             mode = app.ModeDropDown.Value;
             if strcmp(mode,'Interactive')
                 app.iFolder = 1;
                 app.processCurrentFolder();
             else
-                app.runAutoBatch();   % << NEW: auto mode
+                app.runAutoBatch();
             end
         end
 
-        % --- Interactive KTR nav
+        % ---- Interactive: KTR nav ----
         function onPrev(app,~,~)
             if isempty(app.dats_ktr), return; end
             app.j = max(1, app.j - 1);
@@ -305,7 +317,7 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
 
         function onKeyNudge(app,evt)
             if isempty(app.vLines), return; end
-            step = 0.001;
+            step = 0.001; % 1 ms
             switch evt.Key
                 case 'leftarrow',  app.moveSelected(-step);
                 case 'rightarrow', app.moveSelected(+step);
@@ -315,7 +327,7 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
             end
         end
 
-        % --- HFS nav
+        % ---- Interactive: HFS nav ----
         function onHFSPrev(app,~,~)
             if isempty(app.dats_hfs), return; end
             app.hfs_j = max(1, app.hfs_j - 1);
@@ -329,7 +341,8 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
         end
 
         function onHFSFinish(app,~,~)
-            app.saveCSVsForFolder();
+            folderPath = app.subDirs(app.iFolder);
+            app.saveCSVsForFolder(folderPath, app.folderName);
             app.advanceFolder();
         end
 
@@ -348,7 +361,7 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
         end
     end
 
-    %% ---------- FLOW (INTERACTIVE) ----------
+    %% ================== FLOW (INTERACTIVE) ==================
     methods (Access = private)
         function processCurrentFolder(app)
             p = app.subDirs(app.iFolder);
@@ -356,7 +369,9 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
             app.FolderStatusLabel.Text = sprintf('Folder: %d / %d — %s', app.iFolder, numel(app.subDirs), app.folderName);
 
             [app.dats_ktr, app.dats_hfs] = app.readAndSplitFolder(char(p));
+            app.log(sprintf('Loaded folder %s: %d KTR, %d HFS files.', app.folderName, numel(app.dats_ktr), numel(app.dats_hfs)));
             if isempty(app.dats_ktr) && isempty(app.dats_hfs)
+                app.log('No files found here; advancing...');
                 app.advanceFolder(); return;
             end
 
@@ -390,88 +405,112 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
                 app.clearFigure();
                 app.FolderStatusLabel.Text = sprintf('Done! Processed %d folders.', numel(app.subDirs));
                 uialert(app.UIFigure,'Batch processing complete.','Done','Icon','success');
+                app.log('All folders processed (interactive).');
             end
         end
     end
 
-    %% ---------- AUTO MODE ----------
+    %% ================== AUTO MODE ==================
     methods (Access = private)
         function runAutoBatch(app)
-            % Disable controls
-            app.StartBatchButton.Enable = 'off'; app.SelectParentButton.Enable = 'off'; drawnow;
+            if isempty(app.subDirs)
+                uialert(app.UIFigure,'No data folders found under the selected parent.','Nothing to do');
+                app.log('Auto: no folders to process.'); return;
+            end
+
+            % Lock UI
+            app.KCtrlGrid.Visible = 'off';
+            app.HCtrlGrid.Visible = 'off';
+            app.TabGroup.Visible   = 'off';
+            app.StartButton.Enable = 'off';
+            app.SelectParentButton.Enable = 'off';
+            drawnow;
 
             Nfolders = numel(app.subDirs);
             d = uiprogressdlg(app.UIFigure,'Title','Auto mode','Message','Starting…','Indeterminate','off');
 
             for i = 1:Nfolders
-                d.Value = (i-1)/Nfolders; d.Message = sprintf('Folder %d / %d', i, Nfolders); drawnow;
-
-                folderPath = app.subDirs(i);
+                app.iFolder = i;  % ensure any use of index is valid
+                folderPath  = app.subDirs(i);
                 parts = split(folderPath, filesep); base = parts{end};
 
-                [dats_ktr, dats_hfs] = app.readAndSplitFolder(char(folderPath));
+                d.Value   = (i-1)/max(Nfolders,1);
+                d.Message = sprintf('Folder %d / %d — %s', i, Nfolders, base);
+                drawnow;
 
-                % --- KTR auto ---
-                [ktr_all, force_all, f0_all, tmarks] = app.computeKTRAuto(dats_ktr);
+                try
+                    [dats_ktr, dats_hfs] = app.readAndSplitFolder(char(folderPath));
+                    app.log(sprintf('[AUTO] %s: %d KTR, %d HFS', base, numel(dats_ktr), numel(dats_hfs)));
 
-                % --- HFS auto (reuse existing compute, but on local state)
-                app.dats_hfs = dats_hfs;
-                app.computeHFSforFolder();
-                hfs_param = app.hfs_param; %#ok<NASGU>
+                    % KTR auto
+                    [ktr_all, force_all, f0_all, tmarks] = app.computeKTRAuto(dats_ktr);
 
-                % Save (reuse existing writer)
-                app.folderName = base;
-                app.ktr_all = ktr_all; app.force_all = force_all; app.f0_all = f0_all; app.tmarks = tmarks;
-                app.saveCSVsForFolder();
+                    % HFS auto
+                    app.dats_hfs = dats_hfs;
+                    app.computeHFSforFolder();
+                    hfs_param = app.hfs_param; %#ok<NASGU>
+
+                    % Save per folder
+                    app.folderName = base;
+                    app.ktr_all    = ktr_all;
+                    app.force_all  = force_all;
+                    app.f0_all     = f0_all;
+                    app.tmarks     = tmarks;
+                    app.saveCSVsForFolder(char(folderPath), base);
+                    app.log(sprintf('[AUTO] Saved CSVs in %s', folderPath));
+                catch ME
+                    app.log(sprintf('[AUTO][ERROR] %s: %s', base, ME.message));
+                end
             end
 
-            close(d);
-            app.StartBatchButton.Enable = 'on'; app.SelectParentButton.Enable = 'on';
+            d.Value = 1; d.Message = 'Complete'; pause(0.2); close(d);
+
+            % Restore UI
+            app.TabGroup.Visible = 'on';
+            app.StartButton.Enable = 'on';
+            app.SelectParentButton.Enable = 'on';
+
             uialert(app.UIFigure,'Auto run complete. CSVs saved in each folder.','Done','Icon','success');
+            app.log('All folders processed (auto).');
         end
 
         function [ktr_all, force_all, f0_all, tmarks] = computeKTRAuto(app, dats_ktr)
             N = numel(dats_ktr);
             ktr_all = nan(N,1); force_all = nan(N,1); f0_all = nan(N,1); tmarks = nan(N,3);
-
             for j = 1:N
-                [t, f] = app.parseKTR(dats_ktr{j});
-
-                % default marks = nearest to guesses
-                tj = zeros(1,3);
-                for k=1:3, tj(k) = t(app.nearestIdx(t, app.guessT(k))); end
-                tmarks(j,:) = tj;
-
-                [~,i1] = min(abs(t - tj(1)));
-                [~,i2] = min(abs(t - tj(2)));
-                [~,i3] = min(abs(t - tj(3)));
-                if i2<i1, tmp=i1; i1=i2; i2=tmp; end
-                [~,i4] = min(abs(t - app.t4));
-
-                f0   = mean(f(i1:i2));
-                tktr = t(i3:end) - t(i3);
-                fktr = f(i3:end) - f0;
-
-                Ft = @(p,tt) p(1).*(1 - exp(-p(2).*tt)) + p(3);
-                x0 = [max(fktr), 1, min(fktr)];
                 try
-                    my_fit = lsqcurvefit(Ft, x0, tktr, fktr, [], [], optimoptions('lsqcurvefit','Display','off'));
-                catch
-                    obj = @(p) norm(Ft(p, tktr) - fktr);
-                    my_fit = fminsearch(obj, x0, optimset('Display','off'));
+                    [t, f] = app.parseKTR(dats_ktr{j});
+                    if numel(t) < 5 || numel(f) ~= numel(t)
+                        app.log(sprintf('[AUTO] KTR #%d skipped: insufficient data', j));
+                        continue;
+                    end
+
+                    % default marks = nearest to guesses (clamp in-range)
+                    tj = zeros(1,3);
+                    for k=1:3
+                        guess = app.guessT(k);
+                        if guess < t(1), guess = t(1); end
+                        if guess > t(end), guess = t(end); end
+                        tj(k) = t(app.nearestIdx(t, guess));
+                    end
+                    tmarks(j,:) = tj;
+
+                    [ok, ktr, force, f0] = app.safeComputeKTRFromMarks(t, f, tj);
+                    if ~ok
+                        app.log(sprintf('[AUTO] KTR #%d fit failed.', j));
+                        continue;
+                    end
+                    ktr_all(j)   = ktr;
+                    force_all(j) = force;
+                    f0_all(j)    = f0;
+                catch ME
+                    app.log(sprintf('[AUTO] KTR #%d error: %s', j, ME.message));
                 end
-
-                i4r = max(1, i4 - i3 + 1);
-                force_jj = mean(fktr(i4r:end));
-
-                ktr_all(j)   = my_fit(2);
-                force_all(j) = force_jj;
-                f0_all(j)    = f0;
             end
         end
     end
 
-    %% ---------- KTR (interactive compute/draw) ----------
+    %% ================== KTR (INTERACTIVE DRAW/COMPUTE) ==================
     methods (Access = private)
         function drawCurrentKTR(app)
             N = numel(app.dats_ktr);
@@ -487,18 +526,31 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
                 return;
             end
 
-            if isempty(app.cache{app.j})
-                [t,f] = app.parseKTR(app.dats_ktr{app.j});
-                app.cache{app.j} = struct('t',t,'f',f);
-            else
-                t = app.cache{app.j}.t; f = app.cache{app.j}.f;
+            % cache parse
+            try
+                if isempty(app.cache{app.j})
+                    [t,f] = app.parseKTR(app.dats_ktr{app.j});
+                    app.cache{app.j} = struct('t',t,'f',f);
+                else
+                    t = app.cache{app.j}.t; f = app.cache{app.j}.f;
+                end
+            catch ME
+                app.log(sprintf('Parse error (KTR #%d): %s', app.j, ME.message));
+                app.onSkipFile(); return;
+            end
+
+            if numel(t) < 5 || ~isvector(t)
+                app.log(sprintf('Insufficient data (KTR #%d), skipping.', app.j));
+                app.onSkipFile(); return;
             end
 
             plot(app.Ax, t, f, '.', 'MarkerSize', 6); hold(app.Ax,'on');
 
+            % seed marks near guesses
             for k = 1:3
                 if isnan(app.tmarks(app.j,k))
-                    app.tmarks(app.j,k) = t(app.nearestIdx(t, app.guessT(k)));
+                    g = min(max(app.guessT(k), t(1)), t(end));
+                    app.tmarks(app.j,k) = t(app.nearestIdx(t, g));
                 end
             end
             app.T1Field.Value = app.tmarks(app.j,1);
@@ -506,6 +558,7 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
             app.T3Field.Value = app.tmarks(app.j,3);
             app.T1Field.Enable='on'; app.T2Field.Enable='on'; app.T3Field.Enable='on';
 
+            % draggables
             app.deleteLines();
             yl = app.Ax.YLim;
             for k=1:3
@@ -520,6 +573,7 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
             if nargin<2, drawFit=true; end
             t = app.cache{app.j}.t; f = app.cache{app.j}.f;
 
+            % keep vertical & sync
             for k=1:3
                 if ~isempty(app.vLines{k}) && isvalid(app.vLines{k})
                     yl = app.Ax.YLim;
@@ -531,44 +585,70 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
             app.T2Field.Value = app.tmarks(app.j,2);
             app.T3Field.Value = app.tmarks(app.j,3);
 
-            [~,i1] = min(abs(t - app.tmarks(app.j,1)));
-            [~,i2] = min(abs(t - app.tmarks(app.j,2)));
-            [~,i3] = min(abs(t - app.tmarks(app.j,3)));
+            [ok, ktr, force_jj, f0, yfit, tfit] = app.safeComputeKTRFromMarks(t, f, app.tmarks(app.j,:));
+            if ~ok
+                app.KtrValLabel.Text='NaN'; app.ForceValLabel.Text='NaN'; app.F0ValLabel.Text='NaN';
+                app.log(sprintf('Fit failed at record %d (folder %s). Adjust marks.', app.j, app.folderName));
+                return;
+            end
+
+            app.ktr_all(app.j)   = ktr;
+            app.force_all(app.j) = force_jj;
+            app.f0_all(app.j)    = f0;
+            app.KtrValLabel.Text   = sprintf('%.4g', ktr);
+            app.ForceValLabel.Text = sprintf('%.4g', force_jj);
+            app.F0ValLabel.Text    = sprintf('%.4g', f0);
+
+            if drawFit
+                if ~isempty(app.fitLine) && isvalid(app.fitLine), delete(app.fitLine); end
+                app.fitLine = plot(app.Ax, tfit, yfit + f0, 'LineWidth', 2);
+            end
+        end
+
+        function [ok, ktr, force_jj, f0, yfit, tfit] = safeComputeKTRFromMarks(app, t, f, tj)
+            ok=false; ktr=NaN; force_jj=NaN; f0=NaN; yfit=[]; tfit=[];
+            % indices
+            [~,i1] = min(abs(t - tj(1)));
+            [~,i2] = min(abs(t - tj(2)));
+            [~,i3] = min(abs(t - tj(3)));
             if i2 < i1, tmp=i1; i1=i2; i2=tmp; end
+            if any([i1,i2,i3] < 1) || any([i1,i2,i3] > numel(t)) || i2 <= i1 || i3 >= numel(t)
+                return;
+            end
             [~,i4] = min(abs(t - app.t4));
 
-            f0   = mean(f(i1:i2));
+            % baseline + region
+            f0 = mean(f(i1:i2));
             tktr = t(i3:end) - t(i3);
             fktr = f(i3:end) - f0;
+
+            if ~isvector(tktr) || numel(tktr) < 5
+                return;
+            end
 
             Ft = @(p,tt) p(1).*(1 - exp(-p(2).*tt)) + p(3);
             x0 = [max(fktr), 1, min(fktr)];
             try
                 my_fit = lsqcurvefit(Ft, x0, tktr, fktr, [], [], optimoptions('lsqcurvefit','Display','off'));
             catch
-                obj = @(p) norm(Ft(p, tktr) - fktr);
-                my_fit = fminsearch(obj, x0, optimset('Display','off'));
+                try
+                    obj = @(p) norm(Ft(p, tktr) - fktr);
+                    my_fit = fminsearch(obj, x0, optimset('Display','off'));
+                catch
+                    return;
+                end
             end
             yfit = Ft(my_fit, tktr);
+            tfit = t(i3:end);
 
             i4r = max(1, i4 - i3 + 1);
             force_jj = mean(fktr(i4r:end));
-
-            app.ktr_all(app.j)   = my_fit(2);
-            app.force_all(app.j) = force_jj;
-            app.f0_all(app.j)    = f0;
-            app.KtrValLabel.Text   = sprintf('%.4g', my_fit(2));
-            app.ForceValLabel.Text = sprintf('%.4g', force_jj);
-            app.F0ValLabel.Text    = sprintf('%.4g', f0);
-
-            if drawFit
-                if ~isempty(app.fitLine) && isvalid(app.fitLine), delete(app.fitLine); end
-                app.fitLine = plot(app.Ax, t(i3:end), yfit + f0, 'LineWidth', 2);
-            end
+            ktr = my_fit(2);
+            ok = true;
         end
     end
 
-    %% ---------- HFS (FFT) ----------
+    %% ================== HFS (FFT) ==================
     methods (Access = private)
         function computeHFSforFolder(app)
             M = numel(app.dats_hfs);
@@ -578,34 +658,46 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
             app.hfs_peakf = nan(M,1);
 
             for kk = 1:M
-                [scan_rate, CSA, cal_factor, T, ML, Fv] = app.parseHFS(app.dats_hfs{kk}); %#ok<ASGLU>
-
-                i1 = app.nearestIdx(T, 0.5002);
-                i2 = app.nearestIdx(T, 0.5409);
-
-                y = ML(i1:i2) .* 7.7;
-                Y = fft(y); magY = abs(Y);
-                magDen = max(magY);
                 try
-                    pksY = findpeaks(magY,'SortStr','descend','NPeaks',3); if ~isempty(pksY), magDen = pksY(1); end
-                catch, end
+                    [scan_rate, CSA, cal_factor, T, ML, Fv] = app.parseHFS(app.dats_hfs{kk}); %#ok<ASGLU>
+                    if numel(T) < 5
+                        app.log(sprintf('HFS #%d skipped: insufficient data.', kk));
+                        continue;
+                    end
 
-                z = Fv(i1:i2) ./ (CSA*cal_factor);
-                Z = fft(z); magZ = abs(Z);
+                    i1 = app.nearestIdx(T, 0.5002);
+                    i2 = app.nearestIdx(T, 0.5409);
+                    if i2 <= i1, i2 = min(numel(T), i1+round(0.04*length(T))); end
 
-                N  = numel(z);
-                f  = (0:N-1)*(scan_rate/N);
+                    % Strain FFT denominator
+                    y = ML(i1:i2) .* 7.7;
+                    Y = fft(y); magY = abs(Y);
+                    magDen = max(magY);
+                    try
+                        pksY = findpeaks(magY,'SortStr','descend','NPeaks',3); 
+                        if ~isempty(pksY), magDen = pksY(1); end
+                    catch, end
 
-                pkMag = max(magZ); pkIdx = find(magZ==pkMag,1);
-                try
-                    [pksZ, locsZ] = findpeaks(magZ,'SortStr','descend','NPeaks',3);
-                    if ~isempty(pksZ), pkMag=pksZ(1); pkIdx=locsZ(1); end
-                catch, end
+                    % Stress FFT
+                    z = Fv(i1:i2) ./ (CSA*cal_factor);
+                    Z = fft(z); magZ = abs(Z);
 
-                app.hfs_param(kk) = pkMag / magDen;
-                app.hfs_f{kk}     = f;
-                app.hfs_mag{kk}   = magZ;
-                app.hfs_peakf(kk) = f(pkIdx);
+                    N  = numel(z);
+                    f  = (0:N-1)*(scan_rate/N);
+
+                    pkMag = max(magZ); pkIdx = find(magZ==pkMag,1);
+                    try
+                        [pksZ, locsZ] = findpeaks(magZ,'SortStr','descend','NPeaks',3);
+                        if ~isempty(pksZ), pkMag=pksZ(1); pkIdx=locsZ(1); end
+                    catch, end
+
+                    app.hfs_param(kk) = pkMag / max(eps,magDen);
+                    app.hfs_f{kk}     = f;
+                    app.hfs_mag{kk}   = magZ;
+                    app.hfs_peakf(kk) = f(min(max(pkIdx,1),numel(f)));
+                catch ME
+                    app.log(sprintf('HFS #%d error: %s', kk, ME.message));
+                end
             end
         end
 
@@ -616,8 +708,10 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
 
             if M == 0
                 text(app.AxFFT,0.5,0.5,'No .2 (HFS) files','Units','normalized','HorizontalAlignment','center');
-                app.HFSParamValLabel.Text='—'; return;
+                app.HFSParamValLabel.Text='—';
+                return;
             end
+
             f   = app.hfs_f{app.hfs_j};
             mag = app.hfs_mag{app.hfs_j};
             if isempty(f) || isempty(mag)
@@ -643,21 +737,31 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
         end
     end
 
-    %% ---------- SAVE / IO / HELPERS ----------
+    %% ================== SAVE / IO / HELPERS ==================
     methods (Access = private)
-        function saveCSVsForFolder(app)
-            folderPath = app.subDirs(app.iFolder);
-            base = app.folderName;
+        function saveCSVsForFolder(app, folderPath, base)
+            % Back-compat defaults
+            if nargin < 2 || isempty(folderPath)
+                folderPath = app.subDirs(app.iFolder);
+            end
+            if nargin < 3 || isempty(base)
+                base = app.folderName;
+            end
+            folderPath = char(folderPath);
 
-            if ~isempty(app.ktr_all)
+            if ~isempty(app.ktr_all) && ~all(isnan(app.ktr_all))
                 Tktr = table( (1:numel(app.ktr_all))', ...
                               app.tmarks(:,1), app.tmarks(:,2), app.tmarks(:,3), ...
                               app.f0_all, app.force_all, app.ktr_all, ...
                               'VariableNames',{'index','t1','t2','t3','f0','force_mNmm2','ktr_1_per_s'});
-                writetable(Tktr, fullfile(folderPath, sprintf('%s_ktr.csv', base)));
+                fn = fullfile(folderPath, sprintf('%s_ktr.csv', base));
+                writetable(Tktr, fn);
+                app.log(['Saved ', fn]);
             end
-            if ~isempty(app.hfs_param)
-                writematrix(app.hfs_param, fullfile(folderPath, sprintf('%s_hfs.csv', base)));
+            if ~isempty(app.hfs_param) && ~all(isnan(app.hfs_param))
+                fn = fullfile(folderPath, sprintf('%s_hfs.csv', base));
+                writematrix(app.hfs_param, fn);
+                app.log(['Saved ', fn]);
             end
         end
 
@@ -669,6 +773,8 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
             toks = regexp(names,'\d+\.\d+','match');
             keep = ~cellfun(@isempty, toks);
             L = L(keep); names = names(keep); toks = toks(keep);
+            if isempty(L), dats_ktr={}; dats_hfs={}; return; end
+
             nums = cellfun(@(x) str2double(x{1}), toks);
             [~, ord] = sort(nums);
             L = L(ord); names = names(ord);
@@ -676,8 +782,16 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
             dats_all = cell(numel(L),1);
             for ii = 1:numel(L)
                 fn = fullfile(L(ii).folder, L(ii).name);
-                fid = fopen(fn); dat = textscan(fid,'%[^\n]'); fclose(fid);
-                dats_all{ii,1} = dat{1,1};
+                try
+                    fid = fopen(fn);
+                    dat = textscan(fid,'%[^\n]','Whitespace','');
+                    fclose(fid);
+                    dats_all{ii,1} = dat{1,1};
+                catch
+                    if fid>0, fclose(fid); end
+                    app.log(['Read error: ', fn]);
+                    dats_all{ii,1} = {};
+                end
             end
 
             is_dot1 = endsWith(names, '.1');
@@ -687,49 +801,55 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
         end
 
         function [t,f] = parseKTR(~, datjj)
-            x = find(contains(datjj, "Time (s)") & contains(datjj, "ML (V)") & contains(datjj, "Force (V)"));
+            x = find(contains(datjj, "Time (s)") & contains(datjj, "ML (V)") & contains(datjj, "Force (V)"), 1);
+            assert(~isempty(x), 'KTR header not found');
             raw = datjj(x+1:end,1);
             rows = cellfun(@(line) strsplit(line, '\t'), raw, 'UniformOutput', false);
             rows = cellfun(@(row) str2double(row), rows, 'UniformOutput', false);
             A = vertcat(rows{:});      % [Time, ML, Force] (V)
 
+            % CSA + cal factor
             midx = find(contains(datjj, 'Fiber diameter'), 1);
+            assert(~isempty(midx), 'Fiber diameter missing');
             tokens = regexp(datjj{midx}, '[\t:]\s*', 'split');
             D  = str2double(tokens{end});
             D2 = 0.5*D;
             CSA = (((D+D2)/2)*(1e-3)/2)^2*pi;
 
             idx = find(contains(datjj, 'Factor to convert data to physical units:'), 1);
+            assert(~isempty(idx), 'Cal factor missing');
             tokens = strsplit(datjj{idx}, '\t');
             cal_factor = str2double(tokens{3});
 
             t = A(:,1);
-            f = A(:,3) / (CSA*cal_factor);
+            f = A(:,3) / max(eps, (CSA*cal_factor));  % normalized tension
         end
 
-        function [scan_rate, CSA, cal_factor, T, ML, F] = parseHFS(~, datkk)
-            x = find(contains(datkk, "Time (s)") & contains(datkk, "ML (V)") & contains(datkk, "Force (V)"));
+        function [scan_rate, CSA, cal_factor, T, ML, Fv] = parseHFS(~, datkk)
+            x = find(contains(datkk, "Time (s)") & contains(datkk, "ML (V)") & contains(datkk, "Force (V)"), 1);
+            assert(~isempty(x), 'HFS header not found');
             raw = datkk(x+1:end,1);
             rows = cellfun(@(line) strsplit(line, '\t'), raw, 'UniformOutput', false);
             rows = cellfun(@(row) str2double(row), rows, 'UniformOutput', false);
-            A = vertcat(rows{:});
+            A = vertcat(rows{:});     % [Time, ML, Force] (V)
             T = A(:,1); ML = A(:,2); Fv = A(:,3);
 
             midx = find(contains(datkk, 'Fiber diameter'), 1);
+            assert(~isempty(midx), 'Fiber diameter missing');
             tokens = regexp(datkk{midx}, '[\t:]\s*', 'split');
             D  = str2double(tokens{end});
             D2 = 0.5*D;
             CSA = (((D+D2)/2)*(1e-3)/2)^2*pi;
 
             match_idfreq = find(contains(datkk, 'scan rate (scans/s):','IgnoreCase',true),1);
+            assert(~isempty(match_idfreq), 'Scan rate missing');
             tokens_freq = split(datkk{match_idfreq}, ':');
             scan_rate = str2double(strtrim(tokens_freq{2}));
 
             idy = find(contains(datkk, 'Factor to convert data to physical units:'), 1);
+            assert(~isempty(idy), 'Cal factor missing');
             tokens = strsplit(datkk{idy}, '\t');
             cal_factor = str2double(tokens{3});
-
-            F = Fv;
         end
 
         function i = nearestIdx(~, vec, val)
@@ -751,9 +871,7 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
         function onLineMove(app, k, hline)
             t_now = hline.Position(1,1);
             app.tmarks(app.j,k) = t_now;
-            if k==1, app.T1Field.Value=t_now;
-            elseif k==2, app.T2Field.Value=t_now;
-            else, app.T3Field.Value=t_now; end
+            if k==1, app.T1Field.Value=t_now; elseif k==2, app.T2Field.Value=t_now; else, app.T3Field.Value=t_now; end
             app.computeCurrentKTR(false);
         end
 
@@ -786,17 +904,18 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
         end
 
         function clearFigure(app)
-            cla(app.Ax); cla(app.AxFFT);
+            if ~isempty(app.Ax), cla(app.Ax); end
+            if ~isempty(app.AxFFT), cla(app.AxFFT); end
             app.deleteLines();
             if ~isempty(app.fitLine) && isvalid(app.fitLine), delete(app.fitLine); app.fitLine=[]; end
             app.T1Field.Enable='off'; app.T2Field.Enable='off'; app.T3Field.Enable='off';
             app.T1Field.Value=0; app.T2Field.Value=0; app.T3Field.Value=0;
             app.ForceValLabel.Text='—'; app.KtrValLabel.Text='—'; app.F0ValLabel.Text='—';
             app.RecordIdxLabel.Text='Record: — / —';
-            app.HFSIdxLabel.Text='HFS: — / —'; app.HFSParamValLabel.Text='—';
+            if ~isempty(app.HFSIdxLabel), app.HFSIdxLabel.Text='HFS: — / —'; app.HFSParamValLabel.Text='—'; end
         end
 
-        % ----- recursive enumeration -----
+        % recursive enumeration of “leaf” data folders
         function subs = enumerateDataFolders(app, parent)
             subs = strings(0,1);
             S = dir(parent);
@@ -815,7 +934,19 @@ classdef KTRHFSBatchApp < matlab.apps.AppBase
         function tf = folderHasData(~, p)
             L = dir(p); L = L(~[L.isdir]);
             names = {L.name};
-            tf = any(~cellfun(@isempty, regexp(names,'\d+\.\d+','once')));
+            if isempty(names), tf=false; return; end
+            hasNum = any(~cellfun('isempty', regexp(names,'\d+\.\d+','once')));
+            hasDot = any(endsWith(names, {'.1','.2'}));
+            tf = hasNum || hasDot;
+        end
+
+        function log(app, msg)
+            try
+                app.StatusArea.Value = [app.StatusArea.Value; {msg}];
+                drawnow limitrate;
+            catch
+                fprintf('%s\n',msg);
+            end
         end
     end
 end
